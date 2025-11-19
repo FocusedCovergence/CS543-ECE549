@@ -295,9 +295,12 @@ class ControlNetLightningModule(L.LightningModule):
     def on_validation_epoch_end(self):
         """Compute and log FID / KID for the full validation epoch."""
         fid_score = self.fid.compute()
-        kid_score = self.kid.compute()
+        kid_mean, kid_std = self.kid.compute()
         self.log("val_fid", fid_score, prog_bar=True, on_epoch=True, sync_dist=False)
-        self.log("val_kid", kid_score, prog_bar=False, on_epoch=True, sync_dist=False)
+        self.log(
+            "val_kid_mean", kid_mean, prog_bar=False, on_epoch=True, sync_dist=False
+        )
+        self.log("val_kid_std", kid_std, prog_bar=False, on_epoch=True, sync_dist=False)
 
     def configure_optimizers(self):
         lr = self.cfg.TRAIN.LEARNING_RATE
