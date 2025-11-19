@@ -37,15 +37,13 @@ def download_sd21_and_controlnet(cfg) -> Tuple[str, str]:
     os.makedirs(sd21_path, exist_ok=True)
     os.makedirs(controlnet_path, exist_ok=True)
 
-    torch_dtype = _resolve_dtype(cfg.MODEL.DTYPE)
+    dtype = _resolve_dtype(cfg.MODEL.DTYPE)
 
     # ------------------------------------------------------------------
     # 1) Download / materialize Stable Diffusion 2.1
     # ------------------------------------------------------------------
     print(f"[download_models] Loading SD 2.1 from '{cfg.MODEL.SD21_REPO}' ...")
-    pipe = StableDiffusionPipeline.from_pretrained(
-        cfg.MODEL.SD21_REPO, dtype=torch_dtype
-    )
+    pipe = StableDiffusionPipeline.from_pretrained(cfg.MODEL.SD21_REPO, dtype=dtype)
 
     print(f"[download_models] Saving SD 2.1 pipeline to '{sd21_path}' ...")
     pipe.save_pretrained(sd21_path)

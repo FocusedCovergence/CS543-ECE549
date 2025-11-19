@@ -43,7 +43,7 @@ _C.DATA.FITZPATRICK_17K.IMAGES = "Fitzpatrick17k_images"
 _C.DATA.FITZPATRICK_17K.CSV = (Path("fitzpatrick17k") / "fitzpatrick17k.csv").as_posix()
 # Hyperparameters
 _C.DATA.IMG_SIZE = 512  # final square size
-_C.DATA.BATCH_SIZE = 1
+_C.DATA.BATCH_SIZE = 2
 _C.DATA.NUM_WORKERS = 4
 _C.DATA.VAL_SPLIT = 0.1  # fraction of data used for validation
 _C.DATA.TEST_SPLIT = 0.1  # fraction of data used for test
@@ -67,9 +67,20 @@ _C.TRAIN.ADAM_BETA1 = 0.9
 _C.TRAIN.ADAM_BETA2 = 0.999
 _C.TRAIN.ADAM_WEIGHT_DECAY = 1e-2
 _C.TRAIN.ADAM_EPS = 1e-8
+_C.TRAIN.EPOCHS = 5
 _C.TRAIN.DEVICE = "mps"
 _C.TRAIN.CHECKPOINT_FILENAME = "controlnet-{epoch:03d}-{step}"
 _C.TRAIN.SAVE_LAST = True
+_C.TRAIN.OPTIMIZER = "sgd"
+_C.TRAIN.MOMENTUM = 0
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
+_C.VAL = CN()
+_C.VAL.SANITY_CHECK_STEPS = 0
+_C.VAL.INFERENCE_STEPS = 25
+_C.VAL.GUIDANCE_SCALE = 7.5
 
 
 def get_cfg_defaults() -> CN:

@@ -9,10 +9,11 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from torch.optim import AdamW
-
+from torch.optim import AdamW, SGD
 import lightning as L
 from diffusers import StableDiffusionPipeline, ControlNetModel, DDPMScheduler
+from torchmetrics.image.fid import FrechetInceptionDistance
+from torchmetrics.image.kid import KernelInceptionDistance
 
 from .constants import get_cfg_defaults
 
@@ -52,32 +53,33 @@ class ControlNetLightningModule(L.LightningModule):
         weight_dtype = _resolve_dtype(cfg.MODEL.DTYPE)
         self.weight_dtype = weight_dtype
 
-        # Load SD 2.1 pipeline from disk.
         sd_pipe = StableDiffusionPipeline.from_pretrained(
             sd21_path, torch_dtype=weight_dtype, safety_checker=None
         )
-
         self.vae = sd_pipe.vae
         self.text_encoder = sd_pipe.text_encoder
         self.tokenizer = sd_pipe.tokenizer
         self.unet = sd_pipe.unet
-
-        # Load ControlNet, which will be the only trainable component.
-        self.controlnet = ControlNetModel.from_pretrained(
-            controlnet_path, torch_dtype=weight_dtype
-        )
-
-        # Noise scheduler (DDPM, as used during SD 2.1 training).
         self.noise_scheduler = DDPMScheduler.from_pretrained(
             sd21_path, subfolder="scheduler"
         )
 
-        # Freeze SD 2.1 components; only ControlNet learns.
+        self.controlnet = ControlNetModel.from_pretrained(
+            controlnet_path, torch_dtype=weight_dtype
+        )
+
+        # Latent downsampling factor of the VAE (e.g., 8 for 512x512 -> 64x64).
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+
+        self.fid = FrechetInceptionDistance(normalize=True).to("cpu")
+        self.kid = KernelInceptionDistance(normalize=True).to("cpu")
+        self.fid.set_dtype(torch.float32)
+        self.kid.set_dtype(torch.float32)
+
         self._freeze_module(self.vae)
         self._freeze_module(self.text_encoder)
         self._freeze_module(self.unet)
 
-        # Save hyperparameters for Lightning (ignore large modules).
         self.save_hyperparameters({"cfg": cfg})
 
     # ------------------------------------------------------------------
@@ -115,13 +117,7 @@ class ControlNetLightningModule(L.LightningModule):
         return text_embeddings
 
     def _prepare_batch(self, batch):
-        """Normalize batch format from the DataModule into tensors.
-
-        Supports either:
-        - A tuple/list: (pixel_values, controlnet_cond, captions)
-        - A dict with pre-tokenized fields:
-          {"pixel_values", "controlnet_cond", "input_ids", "attention_mask"}
-        """
+        """Normalize batch format from the DataModule into tensors."""
         if isinstance(batch, dict):
             pixel_values = batch["pixel_values"]
             controlnet_cond = batch["controlnet_cond"]
@@ -129,9 +125,7 @@ class ControlNetLightningModule(L.LightningModule):
             attention_mask = batch.get("attention_mask", None)
             return pixel_values, controlnet_cond, input_ids, attention_mask
 
-        # Otherwise, assume (pixel_values, controlnet_cond, captions)
         pixel_values, controlnet_cond, captions = batch
-        # Tokenize captions using the SD 2.1 tokenizer.
         encoding = self.tokenizer(
             list(captions),
             padding="max_length",
@@ -142,6 +136,55 @@ class ControlNetLightningModule(L.LightningModule):
         input_ids = encoding.input_ids
         attention_mask = encoding.attention_mask
         return pixel_values, controlnet_cond, input_ids, attention_mask
+
+    @torch.no_grad()
+    def generate_images(
+        self, pixel_values, controlnet_cond, input_ids, attention_mask=None
+    ):
+        batch_size, _, height, width = pixel_values.shape
+
+        # Prepare conditioning
+        encoder_hidden_states = self.encode_text(input_ids, attention_mask)
+        controlnet_cond = controlnet_cond.to(self.device, dtype=self.weight_dtype)
+
+        latents = torch.randn(
+            batch_size,
+            self.unet.in_channels,
+            height // self.vae_scale_factor,
+            width // self.vae_scale_factor,
+            device=self.device,
+            dtype=self.weight_dtype,
+        )
+
+        self.noise_scheduler.set_timesteps(self.cfg.VAL.INFERENCE_STEPS)
+
+        for t in self.noise_scheduler.timesteps:
+            # ControlNet: get additional residuals
+            down_block_res_samples, mid_block_res_sample = self.controlnet(
+                latents,
+                t,
+                encoder_hidden_states=encoder_hidden_states,
+                controlnet_cond=controlnet_cond,
+                return_dict=False,
+            )
+
+            # UNet denoising with ControlNet residuals
+            unet_out = self.unet(
+                latents,
+                t,
+                encoder_hidden_states=encoder_hidden_states,
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+            )
+            noise_pred = unet_out.sample
+
+            latents = self.noise_scheduler.step(noise_pred, t, latents).prev_sample
+
+        # Decode latents to images in [0, 1]
+        latents = latents / self.vae.config.scaling_factor
+        images = self.vae.decode(latents).sample
+        images = (images / 2.0 + 0.5).clamp(0.0, 1.0)
+        return images
 
     # ------------------------------------------------------------------
     # Lightning hooks
@@ -202,24 +245,78 @@ class ControlNetLightningModule(L.LightningModule):
             target = noise
 
         loss = F.mse_loss(noise_pred.float(), target.float())
-        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log(
+            "train_loss",
+            loss,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.cfg.DATA.BATCH_SIZE,
+        )
         return loss
 
-    def configure_optimizers(self):
-        """Configure AdamW optimizer over ControlNet parameters only."""
+    def on_validation_epoch_start(self):
+        self.fid.reset()
+        self.fid.to("cpu")
+        self.kid.reset()
+        self.kid.to("cpu")
 
+    def validation_step(self, batch, batch_idx):
+        pixel_values, controlnet_cond, input_ids, attention_mask = self._prepare_batch(
+            batch
+        )
+
+        pixel_values = pixel_values.to(self.device, dtype=self.weight_dtype)
+        controlnet_cond = controlnet_cond.to(self.device, dtype=self.weight_dtype)
+        input_ids = input_ids.to(self.device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.device)
+
+        # Generate images with the current model.
+        gen_images = self.generate_images(
+            pixel_values=pixel_values,
+            controlnet_cond=controlnet_cond,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+
+        real_images = (pixel_values / 2.0 + 0.5).clamp(0.0, 1.0)
+        real_images = real_images.detach().cpu().to(torch.float32)
+        fake_images = gen_images.clamp(0.0, 1.0)
+        fake_images = fake_images.detach().cpu().to(torch.float32)
+
+        self.fid.update(real_images, real=True)
+        self.fid.update(fake_images, real=False)
+        self.kid.update(real_images, real=True)
+        self.kid.update(fake_images, real=False)
+
+        return {}
+
+    def on_validation_epoch_end(self):
+        """Compute and log FID / KID for the full validation epoch."""
+        fid_score = self.fid.compute()
+        kid_score = self.kid.compute()
+        self.log("val_fid", fid_score, prog_bar=True, on_epoch=True, sync_dist=False)
+        self.log("val_kid", kid_score, prog_bar=False, on_epoch=True, sync_dist=False)
+
+    def configure_optimizers(self):
         lr = self.cfg.TRAIN.LEARNING_RATE
         beta1 = self.cfg.TRAIN.ADAM_BETA1
         beta2 = self.cfg.TRAIN.ADAM_BETA2
         weight_decay = self.cfg.TRAIN.ADAM_WEIGHT_DECAY
         eps = self.cfg.TRAIN.ADAM_EPS
+        momentum = self.cfg.TRAIN.MOMENTUM
 
-        optimizer = AdamW(
-            self.controlnet.parameters(),
-            lr=lr,
-            betas=(beta1, beta2),
-            weight_decay=weight_decay,
-            eps=eps,
-        )
+        match self.cfg.TRAIN.OPTIMIZER.lower():
+            case "adamw":
+                optimizer = AdamW(
+                    self.controlnet.parameters(),
+                    lr=lr,
+                    betas=(beta1, beta2),
+                    weight_decay=weight_decay,
+                    eps=eps,
+                )
+            case "sgd":
+                optimizer = SGD(self.controlnet.parameters(), lr=lr, momentum=momentum)
 
         return optimizer
