@@ -3,6 +3,7 @@ Global configuration for the diffusion project.
 """
 
 from pathlib import Path
+import argparse
 
 from yacs.config import CfgNode as CN
 
@@ -55,8 +56,8 @@ _C.DATA.AUG.RANDOM_ROTATION = 0.0  # degrees
 # Control signal configuration
 _C.CONTROL = CN()
 _C.CONTROL.TYPE = "canny"
-_C.CONTROL.CANNY_LOW = 100
-_C.CONTROL.CANNY_HIGH = 200
+_C.CONTROL.CANNY_LOW = 125
+_C.CONTROL.CANNY_HIGH = 350
 
 # -----------------------------------------------------------------------------
 # Training
@@ -82,14 +83,20 @@ _C.VAL.SANITY_CHECK_STEPS = 0
 _C.VAL.INFERENCE_STEPS = 25
 _C.VAL.GUIDANCE_SCALE = 7.5
 
+# -----------------------------------------------------------------------------
+# INFERENCE
+# -----------------------------------------------------------------------------
+_C.INFERENCE = CN()
+_C.INFERENCE.DEVICE = "mps"
+_C.INFERENCE.STEPS = 25
+_C.INFERENCE.GUIDANCE_SCALE = 7.5
+
 
 def get_cfg_defaults() -> CN:
     return _C.clone()
 
 
 def build_cfg_from_cli(args=None) -> CN:
-    import argparse
-
     parser = argparse.ArgumentParser(description="Diffusion config builder")
     parser.add_argument(
         "--config-file",

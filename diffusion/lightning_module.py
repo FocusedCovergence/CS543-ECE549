@@ -323,3 +323,25 @@ class ControlNetLightningModule(L.LightningModule):
                 optimizer = SGD(self.controlnet.parameters(), lr=lr, momentum=momentum)
 
         return optimizer
+
+
+# ---------------------------------------------------------------
+# Utility function to load a model from a checkpoint
+# ---------------------------------------------------------------
+def load_model_from_checkpoint(cfg, checkpoint_path=None):
+    root = Path(cfg.PATHS.ROOT)
+    ckpt_dir = root / cfg.PATHS.CHECKPOINTS
+
+    if checkpoint_path is None:
+        checkpoint_path = ckpt_dir / "last.ckpt"
+    else:
+        checkpoint_path = Path(checkpoint_path)
+
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+    model = ControlNetLightningModule.load_from_checkpoint(
+        checkpoint_path.as_posix(), cfg=cfg, strict=False, map_location="cpu"
+    )
+    model.eval()
+    return model
