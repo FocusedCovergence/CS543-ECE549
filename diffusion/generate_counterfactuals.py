@@ -140,7 +140,7 @@ def visualize_validation_index_counterfactuals(idx, cfg=None):
     # Counterfactuals: fill remaining 6 slots
     # slots 0,0 and 0,1 are used; start from linear index 2
     fitz_list = sorted(FITZPATRICK_TYPES.keys())
-    for i, fitz in (1, 1): enumerate(fitz_list):
+    for i, fitz in enumerate(fitz_list):
         row = (i + 2) // 4
         col = (i + 2) % 4
         cf_img, _ = counterfactuals[fitz]
@@ -193,16 +193,18 @@ def generate_all_counterfactuals_for_splits(cfg=None):
             md5_batch = md5_list[global_index : global_index + batch_size]
             global_index += batch_size
 
-            control = control_batch.clamp(0.0, 1.0).to(device=pipe.device, dtype=pipe.unet.dtype)
+            control = control_batch.clamp(0.0, 1.0).to(
+                device=pipe.device, dtype=pipe.unet.dtype
+            )
 
             if isinstance(captions, tuple):
                 captions = list(captions)
 
             for fitz in sorted(FITZPATRICK_TYPES.keys()):
-                modified_prompts = [
-                    modify_caption_skin_tone(c, fitz) for c in captions
-                ]
-                generator = torch.Generator(device=pipe.device).manual_seed(cfg.DATA.RANDOM_SEED + fitz)
+                modified_prompts = [modify_caption_skin_tone(c, fitz) for c in captions]
+                generator = torch.Generator(device=pipe.device).manual_seed(
+                    cfg.DATA.RANDOM_SEED + fitz
+                )
 
                 with torch.inference_mode():
                     outputs = pipe(
