@@ -149,7 +149,7 @@ def visualize_validation_index_counterfactuals(idx, cfg=None):
         ax.set_title(f"Fitzpatrick {fitz}")
         ax.axis("off")
 
-    fig.title(caption)
+    print(caption)
     plt.tight_layout()
     plt.show()
 
