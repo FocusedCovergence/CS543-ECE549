@@ -41,7 +41,7 @@ def train_from_scratch(cfg):
         dirpath=str(checkpoint_dir),
         filename=cfg.TRAIN.CHECKPOINT_FILENAME,
         save_top_k=1,
-        monitor="train_loss",
+        monitor="val_fid",
         mode="min",
         save_last=cfg.TRAIN.SAVE_LAST,
     )
