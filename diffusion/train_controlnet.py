@@ -1,6 +1,7 @@
 import lightning as L
 from pathlib import Path
 from lightning.pytorch.callbacks import ModelCheckpoint
+import torch
 
 from .constants import build_cfg_from_cli
 from .lightning_module import ControlNetLightningModule
@@ -10,7 +11,8 @@ from .datamodule import FitzpatrickDataModule
 def train_from_scratch(cfg):
     dm = FitzpatrickDataModule(cfg)
     model = ControlNetLightningModule(cfg)
-    model.controlnet.train()
+    model.train()
+    torch.set_float32_matmul_precision("medium")
 
     device = cfg.TRAIN.DEVICE.lower()
     if device in {"cuda", "gpu"}:

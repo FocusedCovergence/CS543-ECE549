@@ -149,7 +149,7 @@ class ControlNetLightningModule(L.LightningModule):
 
         latents = torch.randn(
             batch_size,
-            self.unet.in_channels,
+            self.unet.config.in_channels,
             height // self.vae_scale_factor,
             width // self.vae_scale_factor,
             device=self.device,
