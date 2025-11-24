@@ -1,6 +1,4 @@
 from pathlib import Path
-import re
-from typing import Tuple, Optional
 
 import torch
 from torchvision.transforms.functional import to_pil_image
@@ -124,6 +122,7 @@ def visualize_validation_index_counterfactuals(idx, cfg=None):
         counterfactuals[fitz] = (cf_img, cf_caption)
 
     fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+    fig.suptitle(f"Caption: {caption}", fontsize=14)
 
     # Original image
     ax = axes[0, 0]
@@ -151,6 +150,8 @@ def visualize_validation_index_counterfactuals(idx, cfg=None):
 
     print(caption)
     plt.tight_layout()
+    save_path = Path(cfg.PATHS.ROOT) / f"counterfactuals_idx_{idx}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
 
     return fig, counterfactuals
