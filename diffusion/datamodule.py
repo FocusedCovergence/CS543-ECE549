@@ -16,6 +16,13 @@ from .constants import get_cfg_defaults
 from .generate_captions import format_as_caption
 
 
+DDI_SKIN_TONE_DESCRIPTIONS = {
+    12: "light (Fitzpatrick I-II)",
+    34: "medium (Fitzpatrick III-IV)",
+    56: "dark (Fitzpatrick V-VI)",
+}
+
+
 class FitzpatrickDataset(Dataset):
     """
     Simple dataset for Fitzpatrick17k.
@@ -101,6 +108,96 @@ class FitzpatrickDataset(Dataset):
         return img_tensor, control, caption
 
 
+class DDIDataset(Dataset):
+    """DDI evaluation dataset with ControlNet conditioning."""
+
+    def __init__(self, df: pd.DataFrame, cfg, train=False):
+        self.df = df.reset_index(drop=True)
+        self.cfg = cfg
+        self.train = train
+        root = Path(cfg.DATA.ROOT)
+        self.images_dir = root / cfg.DATA.DDI.DIR
+        self.img_col = cfg.DATA.DDI.IMG_COLUMN
+        self.skin_tone_col = cfg.DATA.DDI.SKIN_TONE_COLUMN
+        self.malignant_col = cfg.DATA.DDI.MALIGNANT_COLUMN
+        self.disease_col = cfg.DATA.DDI.DISEASE_COLUMN
+
+    def __len__(self):
+        return len(self.df)
+
+    @staticmethod
+    def _as_bool(value) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes"}
+        return bool(value)
+
+    def _format_caption(self, row):
+        tone_value = row.get(self.skin_tone_col)
+        tone_value = int(tone_value) if pd.notna(tone_value) else None
+        tone_desc = (
+            DDI_SKIN_TONE_DESCRIPTIONS.get(tone_value, "an unspecified skin tone")
+            if tone_value is not None
+            else "an unspecified skin tone"
+        )
+        disease = row.get(self.disease_col, "a skin condition")
+        disease = disease if isinstance(disease, str) and disease else "a skin condition"
+        malignancy = "malignant" if self._as_bool(row[self.malignant_col]) else "benign"
+        if tone_value is not None:
+            tone_phrase = f" (group {tone_value})"
+        else:
+            tone_phrase = ""
+        return (
+            f"A dermatology image from the DDI dataset showing {disease} ({malignancy}) "
+            f"on a patient with {tone_desc}{tone_phrase}."
+        )
+
+    def __getitem__(self, idx: int):
+        row = self.df.iloc[idx]
+        img_name = row[self.img_col]
+        img_path = self.images_dir / img_name
+        pil_img = Image.open(img_path).convert("RGB")
+
+        size = self.cfg.DATA.IMG_SIZE
+        pil_img = pil_img.resize((size, size))
+
+        if self.train and self.cfg.DATA.AUG.HORIZONTAL_FLIP:
+            if np.random.rand() < 0.5:
+                pil_img = pil_img.transpose(Image.FLIP_LEFT_RIGHT)
+
+        if (
+            self.train
+            and self.cfg.DATA.AUG.RANDOM_ROTATION
+            and self.cfg.DATA.AUG.RANDOM_ROTATION > 0
+        ):
+            angle = np.random.uniform(
+                -self.cfg.DATA.AUG.RANDOM_ROTATION,
+                self.cfg.DATA.AUG.RANDOM_ROTATION,
+            )
+            pil_img = pil_img.rotate(angle)
+
+        img_tensor = T.ToTensor()(pil_img)
+        img_tensor = T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])(img_tensor)
+
+        np_img = np.array(pil_img)
+        if self.cfg.CONTROL.TYPE == "canny":
+            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
+            edges = cv2.Canny(
+                gray,
+                threshold1=self.cfg.CONTROL.CANNY_LOW,
+                threshold2=self.cfg.CONTROL.CANNY_HIGH,
+            )
+            control_map = edges.astype(np.float32) / 255.0
+        elif self.cfg.CONTROL.TYPE == "grayscale":
+            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
+            control_map = gray.astype(np.float32) / 255.0
+        else:
+            raise ValueError(f"Unsupported control type: {self.cfg.CONTROL.TYPE}")
+
+        control = torch.from_numpy(control_map)[None, ...]
+        caption = self._format_caption(row)
+        return img_tensor, control, caption
+
+
 class FitzpatrickDataModule(L.LightningDataModule):
     """
     Lightning DataModule for Fitzpatrick17k.
@@ -123,6 +220,7 @@ class FitzpatrickDataModule(L.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
+        self._ddi_df = None
 
     def prepare_data(self):
         """
@@ -185,7 +283,26 @@ class FitzpatrickDataModule(L.LightningDataModule):
             self.val_dataset = FitzpatrickDataset(self._val_df, self.cfg, train=False)
 
         if stage == "test" or stage is None:
-            self.test_dataset = FitzpatrickDataset(self._test_df, self.cfg, train=False)
+            if self._ddi_df is None:
+                self._ddi_df = self._load_ddi_dataframe()
+            self.test_dataset = DDIDataset(self._ddi_df, self.cfg, train=False)
+
+    def _load_ddi_dataframe(self) -> pd.DataFrame:
+        root = Path(self.cfg.DATA.ROOT)
+        ddi_dir = root / self.cfg.DATA.DDI.DIR
+        csv_path = ddi_dir / self.cfg.DATA.DDI.CSV
+        df = pd.read_csv(csv_path)
+        img_col = self.cfg.DATA.DDI.IMG_COLUMN
+
+        df = df[df[img_col].notna()].copy()
+        df[img_col] = df[img_col].astype(str).str.strip()
+        df = df[df[img_col].ne("")].copy()
+
+        def _has_image(name: str) -> bool:
+            return (ddi_dir / name).is_file()
+
+        exists_mask = df[img_col].apply(_has_image)
+        return df[exists_mask].reset_index(drop=True)
 
     # ------------------------------------------------------------------ #
     # Dataloaders
