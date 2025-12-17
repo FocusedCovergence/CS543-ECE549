@@ -19,7 +19,7 @@ DTYPE_MAP = {
 }
 
 
-def _resolve_dtype(dtype_str: str) -> torch.dtype:
+def _resolve_dtype(dtype_str):
     if dtype_str not in DTYPE_MAP:
         raise ValueError(
             f"Unsupported dtype '{dtype_str}'. Expected one of {list(DTYPE_MAP)}."
@@ -27,9 +27,9 @@ def _resolve_dtype(dtype_str: str) -> torch.dtype:
     return DTYPE_MAP[dtype_str]
 
 
-def download_sd21_and_controlnet(cfg) -> Tuple[str, str]:
+def download_stable_diffusion_and_controlnet(cfg):
     """
-    Download SD 2.1 and ControlNet according to the global config.
+    Download SD and ControlNet according to the global config.
     """
     root = Path(cfg.PATHS.ROOT)
     sd21_path = root / cfg.PATHS.SD21
@@ -40,19 +40,19 @@ def download_sd21_and_controlnet(cfg) -> Tuple[str, str]:
     dtype = _resolve_dtype(cfg.MODEL.DTYPE)
 
     # ------------------------------------------------------------------
-    # 1) Download / materialize Stable Diffusion 2.1
+    # 1) Download / materialize Stable Diffusion
     # ------------------------------------------------------------------
-    print(f"[download_models] Loading SD 2.1 from '{cfg.MODEL.SD21_REPO}' ...")
-    pipe = StableDiffusionPipeline.from_pretrained(cfg.MODEL.SD21_REPO, dtype=dtype)
+    print(f"[download_models] Loading Stable Diffusion from '{cfg.MODEL.SD_REPO}' ...")
+    pipe = StableDiffusionPipeline.from_pretrained(cfg.MODEL.SD_REPO, dtype=dtype)
 
-    print(f"[download_models] Saving SD 2.1 pipeline to '{sd21_path}' ...")
+    print(f"[download_models] Saving SD pipeline to '{sd21_path}' ...")
     pipe.save_pretrained(sd21_path)
 
     # ------------------------------------------------------------------
     # 2) Initialize or download ControlNet
     # ------------------------------------------------------------------
     if cfg.MODEL.INIT_CONTROLNET_FROM_UNET:
-        print("[download_models] Initializing ControlNet from SD 2.1 UNet ...")
+        print("[download_models] Initializing ControlNet from SD UNet ...")
         controlnet = ControlNetModel.from_unet(pipe.unet, conditioning_channels=1)
     else:
         raise NotImplementedError()
@@ -66,7 +66,7 @@ def download_sd21_and_controlnet(cfg) -> Tuple[str, str]:
 
 def main(cli_args=None) -> None:
     cfg = build_cfg_from_cli(args=cli_args)
-    download_sd21_and_controlnet(cfg)
+    download_stable_diffusion_and_controlnet(cfg)
 
 
 if __name__ == "__main__":

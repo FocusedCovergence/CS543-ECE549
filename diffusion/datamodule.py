@@ -79,21 +79,25 @@ class FitzpatrickDataset(Dataset):
         img_tensor = T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])(img_tensor)
 
         # ------------------------------------------------------------------
-        # Control tensor: Canny edge map from augmented image
+        # Control tensor: Canny edge map from augmented image or grayscale
         # ------------------------------------------------------------------
         np_img = np.array(pil_img)  # H, W, 3, uint8
-        gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
-        edges = cv2.Canny(
-            gray,
-            threshold1=self.cfg.CONTROL.CANNY_LOW,
-            threshold2=self.cfg.CONTROL.CANNY_HIGH,
-        )
-        edges = edges.astype(np.float32) / 255.0  # [0, 1]
-        control = torch.from_numpy(edges)[None, ...]  # [1, H, W]
+        if self.cfg.CONTROL.TYPE == "canny":
+            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
+            edges = cv2.Canny(
+                gray,
+                threshold1=self.cfg.CONTROL.CANNY_LOW,
+                threshold2=self.cfg.CONTROL.CANNY_HIGH,
+            )
+            control_map = edges.astype(np.float32) / 255.0  # [0, 1]
+        elif self.cfg.CONTROL.TYPE == "grayscale":
+            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
+            control_map = gray.astype(np.float32) / 255.0  # [0, 1]
+        else:
+            raise ValueError(f"Unsupported control type: {self.cfg.CONTROL.TYPE}")
 
-        # Caption from your helper
+        control = torch.from_numpy(control_map)[None, ...]  # [1, H, W]
         caption = format_as_caption(row)
-
         return img_tensor, control, caption
 
 

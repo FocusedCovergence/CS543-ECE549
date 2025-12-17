@@ -257,9 +257,9 @@ class ControlNetLightningModule(L.LightningModule):
 
     def on_validation_epoch_start(self):
         self.fid.reset()
-        self.fid.to("cpu")
+        self.fid.to(self.device)
         self.kid.reset()
-        self.kid.to("cpu")
+        self.kid.to(self.device)
 
     def validation_step(self, batch, batch_idx):
         pixel_values, controlnet_cond, input_ids, attention_mask = self._prepare_batch(
@@ -281,9 +281,9 @@ class ControlNetLightningModule(L.LightningModule):
         )
 
         real_images = (pixel_values / 2.0 + 0.5).clamp(0.0, 1.0)
-        real_images = real_images.detach().cpu().to(torch.float32)
+        real_images = real_images.detach().to(torch.float32)
         fake_images = gen_images.clamp(0.0, 1.0)
-        fake_images = fake_images.detach().cpu().to(torch.float32)
+        fake_images = fake_images.detach().to(torch.float32)
 
         self.fid.update(real_images, real=True)
         self.fid.update(fake_images, real=False)
@@ -296,11 +296,27 @@ class ControlNetLightningModule(L.LightningModule):
         """Compute and log FID / KID for the full validation epoch."""
         fid_score = self.fid.compute()
         kid_mean, kid_std = self.kid.compute()
-        self.log("val_fid", fid_score, prog_bar=True, on_epoch=True, sync_dist=False)
         self.log(
-            "val_kid_mean", kid_mean, prog_bar=False, on_epoch=True, sync_dist=False
+            "val_fid",
+            fid_score.to(self.device),
+            prog_bar=True,
+            on_epoch=True,
+            sync_dist=True,
         )
-        self.log("val_kid_std", kid_std, prog_bar=False, on_epoch=True, sync_dist=False)
+        self.log(
+            "val_kid_mean",
+            kid_mean.to(self.device),
+            prog_bar=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log(
+            "val_kid_std",
+            kid_std.to(self.device),
+            prog_bar=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
 
     def configure_optimizers(self):
         lr = self.cfg.TRAIN.LEARNING_RATE
@@ -321,6 +337,8 @@ class ControlNetLightningModule(L.LightningModule):
                 )
             case "sgd":
                 optimizer = SGD(self.controlnet.parameters(), lr=lr, momentum=momentum)
+            case _ as o:
+                raise NotImplementedError(o)
 
         return optimizer
 

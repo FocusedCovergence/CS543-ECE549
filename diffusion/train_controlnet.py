@@ -32,8 +32,6 @@ def train_from_scratch(cfg):
     else:
         precision = "32-true"
 
-    devices = 1 if accelerator in {"gpu", "mps"} else None
-
     checkpoint_dir = Path(cfg.PATHS.ROOT) / cfg.PATHS.CHECKPOINTS
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -48,7 +46,7 @@ def train_from_scratch(cfg):
 
     trainer = L.Trainer(
         accelerator=accelerator,
-        devices=devices,
+        devices=cfg.TRAIN.N_DEVICES,
         precision=precision,
         default_root_dir=cfg.PATHS.ROOT,
         callbacks=[checkpoint_callback],

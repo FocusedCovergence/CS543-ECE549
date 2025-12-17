@@ -1,7 +1,7 @@
 import pandas as pd, requests, concurrent.futures as cf
 from pathlib import Path
 
-file_path = "/Users/benjaminhavens/Documents/school/ece_549/final_project/fitzpatrick17k/fitzpatrick17k.csv"
+file_path = "/home/havens3/CS543-ECE549/data/fitzpatrick17k/fitzpatrick17k.csv"
 df = pd.read_csv(file_path)
 out = Path("Fitzpatrick17k_images")
 out.mkdir(parents=True, exist_ok=True)
