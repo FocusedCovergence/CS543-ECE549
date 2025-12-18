@@ -16,7 +16,7 @@ _C = CN()
 # Paths for saving / loading models and other artifacts.
 _C.PATHS = CN()
 _C.PATHS.ROOT = "artifacts"  # Root folder for all artifacts
-_C.PATHS.CHECKPOINTS = "checkpoints"  # Directory for Lightning checkpoints
+_C.PATHS.CHECKPOINTS = "classifier_checkpoints"  # Directory for Lightning checkpoints
 
 # -----------------------------------------------------------------------------
 # Model
@@ -28,17 +28,17 @@ _C.MODEL.MODEL_NAME = "resnet18"  # {"resnet18", "vit_b_16"}
 _C.MODEL.NUM_CLASSES = 2
 _C.MODEL.FREEZE_BACKBONE = False
 _C.MODEL.CLASSIFIER_DROPOUT = 0.0
-_C.MODEL.RESNET18_WEIGHTS = "IMAGENET1K_V1"
+_C.MODEL.RESNET18_WEIGHTS = None
 _C.MODEL.VIT_B_16_WEIGHTS = "DEFAULT"
 _C.MODEL.PRETRAINED = CN()
-_C.MODEL.PRETRAINED.ENABLED = False
+_C.MODEL.PRETRAINED.ENABLED = True
 _C.MODEL.PRETRAINED.LOCAL_PATH = ""
-_C.MODEL.PRETRAINED.HF_HUB_ID = ""
+_C.MODEL.PRETRAINED.HF_HUB_ID = "timm/resnet18.a1_in1k"
 _C.MODEL.PRETRAINED.HF_FILENAME = "pytorch_model.bin"
 _C.MODEL.PRETRAINED.STATE_DICT_KEY = ""
 _C.MODEL.PRETRAINED.STATE_DICT_PREFIX = ""
 _C.MODEL.PRETRAINED.STRICT = False
-_C.MODEL.PRETRAINED.CACHE_DIR = ""
+_C.MODEL.PRETRAINED.CACHE_DIR = "artifacts/hf_cache"
 
 # -----------------------------------------------------------------------------
 # Dataset
@@ -62,7 +62,7 @@ _C.DATA.DDI.MALIGNANT_LABEL = "malignant"
 _C.DATA.DDI.BENIGN_LABEL = "benign"
 # Hyperparameters
 _C.DATA.IMG_SIZE = 512  # final square size
-_C.DATA.BATCH_SIZE = 8
+_C.DATA.BATCH_SIZE = 128
 _C.DATA.NUM_WORKERS = 4
 _C.DATA.VAL_SPLIT = 0.1  # fraction of data used for validation
 _C.DATA.TEST_SPLIT = 0.1  # fraction of data used for test
@@ -83,7 +83,8 @@ _C.TRAIN.ADAM_WEIGHT_DECAY = 1e-2
 _C.TRAIN.ADAM_EPS = 1e-8
 _C.TRAIN.EPOCHS = 30
 _C.TRAIN.DEVICE = "cuda"
-_C.TRAIN.DEVICES = [0, 2]  # or None if no accelerator
+# int num devices, list of devices ids, or None if no accelerator
+_C.TRAIN.DEVICES = [0, 2]
 _C.TRAIN.CHECKPOINT_FILENAME = "classifier-{epoch:03d}-{step}"
 _C.TRAIN.SAVE_LAST = True
 _C.TRAIN.OPTIMIZER = "adamw"

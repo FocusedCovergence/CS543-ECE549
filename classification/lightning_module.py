@@ -176,6 +176,9 @@ class FitzpatrickClassifier(L.LightningModule):
             return
 
         state_dict = self._load_pretrained_state_dict(cfg_pre)
+        if not cfg_pre.STRICT:
+            state_dict = self._filter_mismatched_shapes(state_dict)
+
         missing, unexpected = self.model.load_state_dict(
             state_dict, strict=cfg_pre.STRICT
         )
@@ -220,6 +223,28 @@ class FitzpatrickClassifier(L.LightningModule):
             state_dict = stripped
 
         return state_dict
+
+    def _filter_mismatched_shapes(self, state_dict: dict) -> dict:
+        """Drop checkpoint entries whose tensor shapes do not match the current model."""
+        model_state = self.model.state_dict()
+        filtered: dict[str, torch.Tensor] = {}
+        dropped: list[str] = []
+        for key, value in state_dict.items():
+            if (
+                key in model_state
+                and isinstance(value, torch.Tensor)
+                and model_state[key].shape != value.shape
+            ):
+                dropped.append(key)
+                continue
+            filtered[key] = value
+
+        if dropped:
+            print(
+                "[FitzpatrickClassifier] Dropped mismatched pretrained tensors:",
+                dropped,
+            )
+        return filtered
 
     @staticmethod
     def _resolve_pretrained_checkpoint_path(cfg_pre):
