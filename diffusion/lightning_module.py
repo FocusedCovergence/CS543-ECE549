@@ -72,9 +72,9 @@ class ControlNetLightningModule(L.LightningModule):
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
 
         self.fid = FrechetInceptionDistance(normalize=True).to("cpu")
-        self.kid = KernelInceptionDistance(normalize=True).to("cpu")
+        # self.kid = KernelInceptionDistance(normalize=True).to("cpu")
         self.fid.set_dtype(torch.float32)
-        self.kid.set_dtype(torch.float32)
+        # self.kid.set_dtype(torch.float32)
 
         self._freeze_module(self.vae)
         self._freeze_module(self.text_encoder)
@@ -114,6 +114,12 @@ class ControlNetLightningModule(L.LightningModule):
             )
             # CLIP text encoder returns (last_hidden_state, pooled_output, ...)
             text_embeddings = outputs[0]
+
+        # Match precision/device of the UNet / ControlNet blocks so caption
+        # conditioning is consumed without implicit casts.
+        text_embeddings = text_embeddings.to(
+            device=self.device, dtype=self.weight_dtype
+        )
         return text_embeddings
 
     def _prepare_batch(self, batch):
@@ -144,7 +150,7 @@ class ControlNetLightningModule(L.LightningModule):
         batch_size, _, height, width = pixel_values.shape
 
         # Prepare conditioning
-        encoder_hidden_states = self.encode_text(input_ids, attention_mask)
+        caption_conditioning = self.encode_text(input_ids, attention_mask)
         controlnet_cond = controlnet_cond.to(self.device, dtype=self.weight_dtype)
 
         latents = torch.randn(
@@ -163,7 +169,7 @@ class ControlNetLightningModule(L.LightningModule):
             down_block_res_samples, mid_block_res_sample = self.controlnet(
                 latents,
                 t,
-                encoder_hidden_states=encoder_hidden_states,
+                encoder_hidden_states=caption_conditioning,
                 controlnet_cond=controlnet_cond,
                 return_dict=False,
             )
@@ -172,7 +178,7 @@ class ControlNetLightningModule(L.LightningModule):
             unet_out = self.unet(
                 latents,
                 t,
-                encoder_hidden_states=encoder_hidden_states,
+                encoder_hidden_states=caption_conditioning,
                 down_block_additional_residuals=down_block_res_samples,
                 mid_block_additional_residual=mid_block_res_sample,
             )
@@ -209,20 +215,20 @@ class ControlNetLightningModule(L.LightningModule):
         )
 
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
-        encoder_hidden_states = self.encode_text(input_ids, attention_mask)
+        caption_conditioning = self.encode_text(input_ids, attention_mask)
         controlnet_cond = controlnet_cond.to(self.device, dtype=self.weight_dtype)
 
         down_block_res_samples, mid_block_res_sample = self.controlnet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states=caption_conditioning,
             controlnet_cond=controlnet_cond,
             return_dict=False,
         )
         unet_output = self.unet(
             noisy_latents,
             timesteps,
-            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states=caption_conditioning,
             down_block_additional_residuals=down_block_res_samples,
             mid_block_additional_residual=mid_block_res_sample,
         )
@@ -258,8 +264,8 @@ class ControlNetLightningModule(L.LightningModule):
     def on_validation_epoch_start(self):
         self.fid.reset()
         self.fid.to(self.device)
-        self.kid.reset()
-        self.kid.to(self.device)
+        # self.kid.reset()
+        # self.kid.to(self.device)
 
     def validation_step(self, batch, batch_idx):
         pixel_values, controlnet_cond, input_ids, attention_mask = self._prepare_batch(
@@ -287,15 +293,15 @@ class ControlNetLightningModule(L.LightningModule):
 
         self.fid.update(real_images, real=True)
         self.fid.update(fake_images, real=False)
-        self.kid.update(real_images, real=True)
-        self.kid.update(fake_images, real=False)
+        # self.kid.update(real_images, real=True)
+        # self.kid.update(fake_images, real=False)
 
         return {}
 
     def on_validation_epoch_end(self):
         """Compute and log FID / KID for the full validation epoch."""
         fid_score = self.fid.compute()
-        kid_mean, kid_std = self.kid.compute()
+        # kid_mean, kid_std = self.kid.compute()
         self.log(
             "val_fid",
             fid_score.to(self.device),
@@ -303,20 +309,20 @@ class ControlNetLightningModule(L.LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
-        self.log(
-            "val_kid_mean",
-            kid_mean.to(self.device),
-            prog_bar=False,
-            on_epoch=True,
-            sync_dist=True,
-        )
-        self.log(
-            "val_kid_std",
-            kid_std.to(self.device),
-            prog_bar=False,
-            on_epoch=True,
-            sync_dist=True,
-        )
+        # self.log(
+        #     "val_kid_mean",
+        #     kid_mean.to(self.device),
+        #     prog_bar=False,
+        #     on_epoch=True,
+        #     sync_dist=True,
+        # )
+        # self.log(
+        #     "val_kid_std",
+        #     kid_std.to(self.device),
+        #     prog_bar=False,
+        #     on_epoch=True,
+        #     sync_dist=True,
+        # )
 
     def configure_optimizers(self):
         lr = self.cfg.TRAIN.LEARNING_RATE
@@ -351,7 +357,7 @@ def load_model_from_checkpoint(cfg, checkpoint_path=None):
     ckpt_dir = root / cfg.PATHS.CHECKPOINTS
 
     if checkpoint_path is None:
-        checkpoint_path = ckpt_dir / "last.ckpt"
+        checkpoint_path = ckpt_dir / "last-v1.ckpt"
     else:
         checkpoint_path = Path(checkpoint_path)
 
