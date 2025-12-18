@@ -1,16 +1,19 @@
 """Lightning module for Fitzpatrick17k classification."""
 
+import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Optional, Tuple
 
 import lightning as L
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.optim import AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
+from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score, MulticlassAUROC
 from torchvision import models
+from torchvision.models.vision_transformer import VisionTransformer
 
 from .constants import get_cfg_defaults
 
@@ -77,6 +80,8 @@ class FitzpatrickClassifier(L.LightningModule):
         self.train_f1 = MulticlassF1Score(num_classes=num_classes)
         self.val_f1 = MulticlassF1Score(num_classes=num_classes)
         self.test_f1 = MulticlassF1Score(num_classes=num_classes)
+        self.val_auc = MulticlassAUROC(num_classes=num_classes)
+        self.test_auc = MulticlassAUROC(num_classes=num_classes)
 
     # ------------------------------------------------------------------
     # Model / loss builders
@@ -94,7 +99,13 @@ class FitzpatrickClassifier(L.LightningModule):
             weights = self._resolve_weights(
                 self.cfg.MODEL.VIT_B_16_WEIGHTS, models.ViT_B_16_Weights
             )
-            model = models.vit_b_16(weights=weights)
+            image_size = int(self.cfg.DATA.IMG_SIZE)
+            model = models.vit_b_16(weights=None, image_size=image_size)
+            if weights is not None:
+                state_dict = weights.get_state_dict(progress=True)
+                self._load_state_dict_with_positional_interpolation(
+                    model, state_dict, strict=True
+                )
             in_features = self._infer_vit_hidden_dim(model)
             model.heads = self._build_classifier_head(in_features)
             head_module = model.heads
@@ -179,8 +190,8 @@ class FitzpatrickClassifier(L.LightningModule):
         if not cfg_pre.STRICT:
             state_dict = self._filter_mismatched_shapes(state_dict)
 
-        missing, unexpected = self.model.load_state_dict(
-            state_dict, strict=cfg_pre.STRICT
+        missing, unexpected = self._load_state_dict_with_positional_interpolation(
+            self.model, state_dict, strict=cfg_pre.STRICT
         )
         if cfg_pre.STRICT and (missing or unexpected):
             raise RuntimeError(
@@ -246,6 +257,50 @@ class FitzpatrickClassifier(L.LightningModule):
             )
         return filtered
 
+    def _load_state_dict_with_positional_interpolation(
+        self, model: nn.Module, state_dict: dict, strict: bool = True
+    ):
+        """Load a state dict, interpolating ViT positional embeddings as needed."""
+        if isinstance(model, VisionTransformer):
+            state_dict = self._interpolate_vit_positional_embedding(state_dict, model)
+        return model.load_state_dict(state_dict, strict=strict)
+
+    @staticmethod
+    def _interpolate_vit_positional_embedding(
+        state_dict: dict, model: VisionTransformer
+    ) -> dict:
+        """Adapt ViT positional embeddings when the patch grid changes."""
+        key = "encoder.pos_embedding"
+        if key not in state_dict:
+            return state_dict
+
+        pos_embed = state_dict[key]
+        if not isinstance(pos_embed, torch.Tensor):
+            return state_dict
+
+        total_tokens_old = pos_embed.shape[1]
+        total_tokens_new = model.encoder.pos_embedding.shape[1]
+        if total_tokens_old == total_tokens_new:
+            return state_dict
+
+        cls_token = pos_embed[:, :1, :]
+        patch_tokens = pos_embed[:, 1:, :]
+        num_patches_old = patch_tokens.shape[1]
+        num_patches_new = total_tokens_new - 1
+
+        h_old = int(math.sqrt(num_patches_old))
+        h_new = int(math.sqrt(num_patches_new))
+        if h_old * h_old != num_patches_old or h_new * h_new != num_patches_new:
+            raise ValueError("Unable to reshape positional embeddings for interpolation.")
+
+        patch_tokens = patch_tokens.reshape(1, h_old, h_old, -1).permute(0, 3, 1, 2)
+        patch_tokens = F.interpolate(
+            patch_tokens, size=(h_new, h_new), mode="bicubic", align_corners=False
+        )
+        patch_tokens = patch_tokens.permute(0, 2, 3, 1).reshape(1, h_new * h_new, -1)
+        state_dict[key] = torch.cat([cls_token, patch_tokens], dim=1)
+        return state_dict
+
     @staticmethod
     def _resolve_pretrained_checkpoint_path(cfg_pre):
         if cfg_pre.LOCAL_PATH:
@@ -291,10 +346,10 @@ class FitzpatrickClassifier(L.LightningModule):
         logits = self(images)
         loss = self.criterion(logits, labels)
         preds = torch.argmax(logits, dim=1)
-        return loss, preds, labels
+        return loss, preds, labels, logits
 
     def training_step(self, batch, batch_idx):
-        loss, preds, labels = self._shared_step(batch)
+        loss, preds, labels, _ = self._shared_step(batch)
         self.train_acc(preds, labels)
         self.train_f1(preds, labels)
         self.log("train/loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -303,20 +358,26 @@ class FitzpatrickClassifier(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, preds, labels = self._shared_step(batch)
+        loss, preds, labels, logits = self._shared_step(batch)
         self.val_acc(preds, labels)
         self.val_f1(preds, labels)
+        probs = torch.softmax(logits, dim=1)
+        self.val_auc(probs, labels)
         self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         self.log("val/f1", self.val_f1, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val/auc", self.val_auc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
     def test_step(self, batch, batch_idx):
-        loss, preds, labels = self._shared_step(batch)
+        loss, preds, labels, logits = self._shared_step(batch)
         self.test_acc(preds, labels)
         self.test_f1(preds, labels)
+        probs = torch.softmax(logits, dim=1)
+        self.test_auc(probs, labels)
         self.log("test/loss", loss, on_step=False, on_epoch=True, sync_dist=True)
         self.log("test/acc", self.test_acc, on_step=False, on_epoch=True, sync_dist=True)
         self.log("test/f1", self.test_f1, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("test/auc", self.test_auc, on_step=False, on_epoch=True, sync_dist=True)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         if isinstance(batch, (tuple, list)):

@@ -35,7 +35,7 @@ def train_from_scratch(cfg):
     checkpoint_dir = Path(cfg.PATHS.ROOT) / cfg.PATHS.CHECKPOINTS
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    monitor_metric = "val/acc"
+    monitor_metric = "val/auc"
     checkpoint_callback = ModelCheckpoint(
         dirpath=str(checkpoint_dir),
         filename=cfg.TRAIN.CHECKPOINT_FILENAME,

@@ -24,14 +24,14 @@ _C.PATHS.CHECKPOINTS = "classifier_checkpoints"  # Directory for Lightning check
 # Model
 _C.MODEL = CN()
 _C.MODEL.DTYPE = "float32"
-_C.MODEL.MODEL_NAME = "resnet18"  # {"resnet18", "vit_b_16"}
+_C.MODEL.MODEL_NAME = "vit_b_16"  # {"resnet18", "vit_b_16"}
 _C.MODEL.NUM_CLASSES = 2
 _C.MODEL.FREEZE_BACKBONE = False
 _C.MODEL.CLASSIFIER_DROPOUT = 0.0
 _C.MODEL.RESNET18_WEIGHTS = None
 _C.MODEL.VIT_B_16_WEIGHTS = "DEFAULT"
 _C.MODEL.PRETRAINED = CN()
-_C.MODEL.PRETRAINED.ENABLED = True
+_C.MODEL.PRETRAINED.ENABLED = False
 _C.MODEL.PRETRAINED.LOCAL_PATH = ""
 _C.MODEL.PRETRAINED.HF_HUB_ID = "timm/resnet18.a1_in1k"
 _C.MODEL.PRETRAINED.HF_FILENAME = "pytorch_model.bin"
@@ -62,7 +62,7 @@ _C.DATA.DDI.MALIGNANT_LABEL = "malignant"
 _C.DATA.DDI.BENIGN_LABEL = "benign"
 # Hyperparameters
 _C.DATA.IMG_SIZE = 512  # final square size
-_C.DATA.BATCH_SIZE = 128
+_C.DATA.BATCH_SIZE = 64
 _C.DATA.NUM_WORKERS = 4
 _C.DATA.VAL_SPLIT = 0.1  # fraction of data used for validation
 _C.DATA.TEST_SPLIT = 0.1  # fraction of data used for test
@@ -85,7 +85,7 @@ _C.TRAIN.EPOCHS = 30
 _C.TRAIN.DEVICE = "cuda"
 # int num devices, list of devices ids, or None if no accelerator
 _C.TRAIN.DEVICES = [0, 2]
-_C.TRAIN.CHECKPOINT_FILENAME = "classifier-{epoch:03d}-{step}"
+_C.TRAIN.CHECKPOINT_FILENAME = "vit_512-{epoch:03d}-{step}"
 _C.TRAIN.SAVE_LAST = True
 _C.TRAIN.OPTIMIZER = "adamw"
 _C.TRAIN.MOMENTUM = 0.9
