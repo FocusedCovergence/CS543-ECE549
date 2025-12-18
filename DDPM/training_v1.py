@@ -45,40 +45,6 @@ class SimpleFitzDataset(Dataset):
         label = int(row["malignant"])# 1 for malignant, 0 for benign
         return img, label
 
-
-# class SimpleFitzDataset(Dataset):
-#     def __init__(self, df, transform=None):
-#         self.df = df.reset_index(drop=True)
-#         self.transform = transform
-#         # Base image directory - ADJUST THIS!
-#         self.base_path = "/shared/BIOE589/siemens/Jhersin_Code/CS543-ECE549/Classification/data"
-#
-#     def __len__(self):
-#         return len(self.df)
-#
-#     def __getitem__(self, idx):
-#         # Convert idx to integer if it's a tensor or numpy array
-#         if isinstance(idx, (torch.Tensor, np.integer)):
-#             idx = int(idx)
-#         elif isinstance(idx, np.ndarray):
-#             idx = int(idx.item())
-#
-#         row = self.df.iloc[idx]
-#
-#         # Construct image path
-#         img_path = f"{self.base_path}/{row['md5hash']}.jpg"
-#
-#         # Load image
-#         img = Image.open(img_path).convert("RGB")
-#
-#         if self.transform:
-#             img = self.transform(img)
-#
-#         # Get label
-#         label = int(row["malignant"])  # 1 for malignant, 0 for benign
-#
-#         return img, label
-
 def main():
     # Set the device
     clear_cuda_cache(device_id=7)
@@ -101,12 +67,8 @@ def main():
         ]
     )
 
-    # Creation of dataset
-    # csv_path = '/shared/BIOE589/siemens/Jhersin_Code/CS543-ECE549/Classification/csv/fitzpatrick17k_downloaded.csv'
-    # df = pd.read_csv(csv_path)
-    # benign_df = df[df['three_partition_label'] == 'benign'].copy()
-    # train_dataset = SimpleFitzDataset(df, transform=transform)
-
+    # Creation of the dataloader
+    
     fitzpatrick_df = pd.read_csv(
         "/shared/BIOE589/siemens/Jhersin_Code/CS543-ECE549/Classification/csv/fitzpatrick17k_downloaded.csv")
     fitzpatrick_df = fitzpatrick_df[(fitzpatrick_df["fitzpatrick_scale"] >= 0)].copy()
@@ -174,7 +136,7 @@ def main():
             )
 
             # Predict noise
-            noise_pred = model(noised_images, t, type_t="timestep")[:, :3, :, :] # mean and variance
+            noise_pred = model(noised_images, t, type_t="timestep")[:, :3, :, :] # give you mean and variance but we only intersted in mean.
 
             # Calculate loss
             loss = mse(noise_pred, noise).mean()
@@ -264,4 +226,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
