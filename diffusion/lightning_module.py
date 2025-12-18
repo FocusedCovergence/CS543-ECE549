@@ -250,7 +250,7 @@ class ControlNetLightningModule(L.LightningModule):
         else:
             target = noise
 
-        loss = F.mse_loss(noise_pred.float(), target.float())
+        loss = self._compute_loss(noise_pred, target)
         self.log(
             "train_loss",
             loss,
@@ -348,6 +348,20 @@ class ControlNetLightningModule(L.LightningModule):
 
         return optimizer
 
+    def _compute_loss(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        pred = prediction.float()
+        tgt = target.float()
+        loss_type = self.cfg.TRAIN.LOSS_TYPE.lower()
+
+        if loss_type == "mse":
+            return F.mse_loss(pred, tgt)
+        if loss_type == "l1":
+            return F.l1_loss(pred, tgt)
+        if loss_type == "huber":
+            delta = max(float(self.cfg.TRAIN.HUBER_DELTA), 1e-6)
+            return F.smooth_l1_loss(pred, tgt, beta=delta)
+        raise ValueError(f"Unsupported loss type '{self.cfg.TRAIN.LOSS_TYPE}'.")
+
 
 # ---------------------------------------------------------------
 # Utility function to load a model from a checkpoint
@@ -357,7 +371,7 @@ def load_model_from_checkpoint(cfg, checkpoint_path=None):
     ckpt_dir = root / cfg.PATHS.CHECKPOINTS
 
     if checkpoint_path is None:
-        checkpoint_path = ckpt_dir / "last-v1.ckpt"
+        checkpoint_path = ckpt_dir / "last.ckpt"
     else:
         checkpoint_path = Path(checkpoint_path)
 

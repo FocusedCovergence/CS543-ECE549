@@ -63,14 +63,16 @@ _C.DATA.AUG.HORIZONTAL_FLIP = True
 _C.DATA.AUG.RANDOM_ROTATION = 0.0  # degrees
 # Control signal configuration
 _C.CONTROL = CN()
-_C.CONTROL.TYPE = "grayscale"
+_C.CONTROL.TYPE = "sobel"
 _C.CONTROL.CANNY_LOW = 75
 _C.CONTROL.CANNY_HIGH = 150
-# CONTROL.TYPE may be one of {"canny", "grayscale"}.
+_C.CONTROL.SOBEL_KERNEL = 3  # size must be odd and in {1, 3, 5, 7}
+_C.CONTROL.SOBEL_NORMALIZE = True  # rescale gradient magnitudes to [0, 1]
+# CONTROL.TYPE may be one of {"canny", "grayscale", "sobel"}.
 # - "canny": use Canny edges as a single-channel control map (default)
 # - "grayscale": use the image's grayscale intensities as the control map
+# - "sobel": gradient magnitude from Sobel filters (geometry-heavy, tone-light)
 # TODO: add segmentation image control
-# TODO: give controlnet the caption
 
 # -----------------------------------------------------------------------------
 # Training
@@ -81,13 +83,16 @@ _C.TRAIN.ADAM_BETA1 = 0.9
 _C.TRAIN.ADAM_BETA2 = 0.999
 _C.TRAIN.ADAM_WEIGHT_DECAY = 1e-2
 _C.TRAIN.ADAM_EPS = 1e-8
-_C.TRAIN.EPOCHS = 30
+_C.TRAIN.EPOCHS = 5
 _C.TRAIN.DEVICE = "cuda"
 _C.TRAIN.DEVICES = [0, 2]  # or None if no accelerator
 _C.TRAIN.CHECKPOINT_FILENAME = "controlnet-{epoch:03d}-{step}"
 _C.TRAIN.SAVE_LAST = True
 _C.TRAIN.OPTIMIZER = "adamw"
 _C.TRAIN.MOMENTUM = 0.9
+# Loss configuration
+_C.TRAIN.LOSS_TYPE = "mse"  # one of {"mse", "l1", "huber"}
+_C.TRAIN.HUBER_DELTA = 1.0  # positive threshold for huber loss
 
 # -----------------------------------------------------------------------------
 # Validation
@@ -103,7 +108,9 @@ _C.VAL.GUIDANCE_SCALE = 7.5
 _C.INFERENCE = CN()
 _C.INFERENCE.DEVICE = "cuda"
 _C.INFERENCE.STEPS = 25
-_C.INFERENCE.GUIDANCE_SCALE = 7.5
+# classifier-free guidance messes with inference;
+# need to train with CFG randomly dropping captions
+_C.INFERENCE.GUIDANCE_SCALE = 1
 
 
 def get_cfg_defaults() -> CN:

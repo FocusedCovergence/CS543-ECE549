@@ -89,19 +89,7 @@ class FitzpatrickDataset(Dataset):
         # Control tensor: Canny edge map from augmented image or grayscale
         # ------------------------------------------------------------------
         np_img = np.array(pil_img)  # H, W, 3, uint8
-        if self.cfg.CONTROL.TYPE == "canny":
-            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(
-                gray,
-                threshold1=self.cfg.CONTROL.CANNY_LOW,
-                threshold2=self.cfg.CONTROL.CANNY_HIGH,
-            )
-            control_map = edges.astype(np.float32) / 255.0  # [0, 1]
-        elif self.cfg.CONTROL.TYPE == "grayscale":
-            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
-            control_map = gray.astype(np.float32) / 255.0  # [0, 1]
-        else:
-            raise ValueError(f"Unsupported control type: {self.cfg.CONTROL.TYPE}")
+        control_map = _compute_control_map(np_img, self.cfg)
 
         control = torch.from_numpy(control_map)[None, ...]  # [1, H, W]
         caption = format_as_caption(row)
@@ -140,7 +128,9 @@ class DDIDataset(Dataset):
             else "an unspecified skin tone"
         )
         disease = row.get(self.disease_col, "a skin condition")
-        disease = disease if isinstance(disease, str) and disease else "a skin condition"
+        disease = (
+            disease if isinstance(disease, str) and disease else "a skin condition"
+        )
         malignancy = "malignant" if self._as_bool(row[self.malignant_col]) else "benign"
         if tone_value is not None:
             tone_phrase = f" (group {tone_value})"
@@ -179,19 +169,7 @@ class DDIDataset(Dataset):
         img_tensor = T.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])(img_tensor)
 
         np_img = np.array(pil_img)
-        if self.cfg.CONTROL.TYPE == "canny":
-            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(
-                gray,
-                threshold1=self.cfg.CONTROL.CANNY_LOW,
-                threshold2=self.cfg.CONTROL.CANNY_HIGH,
-            )
-            control_map = edges.astype(np.float32) / 255.0
-        elif self.cfg.CONTROL.TYPE == "grayscale":
-            gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
-            control_map = gray.astype(np.float32) / 255.0
-        else:
-            raise ValueError(f"Unsupported control type: {self.cfg.CONTROL.TYPE}")
+        control_map = _compute_control_map(np_img, self.cfg)
 
         control = torch.from_numpy(control_map)[None, ...]
         caption = self._format_caption(row)
@@ -335,3 +313,37 @@ class FitzpatrickDataModule(L.LightningDataModule):
             pin_memory=True,
             persistent_workers=True,
         )
+
+
+def _compute_control_map(np_img: np.ndarray, cfg) -> np.ndarray:
+    """Return a single-channel control map per CONTROL.TYPE."""
+    control_type = cfg.CONTROL.TYPE.lower()
+
+    if control_type == "canny":
+        gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
+        edges = cv2.Canny(
+            gray,
+            threshold1=cfg.CONTROL.CANNY_LOW,
+            threshold2=cfg.CONTROL.CANNY_HIGH,
+        )
+        control_map = edges.astype(np.float32) / 255.0
+    elif control_type == "grayscale":
+        gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+        control_map = gray
+    elif control_type == "sobel":
+        gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+        ksize = cfg.CONTROL.SOBEL_KERNEL
+        if ksize % 2 == 0 or ksize <= 0:
+            raise ValueError(f"SOBEL_KERNEL must be a positive odd number, got {ksize}")
+        grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=ksize)
+        grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=ksize)
+        grad_mag = cv2.magnitude(grad_x, grad_y)
+        if cfg.CONTROL.SOBEL_NORMALIZE:
+            max_val = grad_mag.max()
+            if max_val > 0:
+                grad_mag = grad_mag / max_val
+        control_map = grad_mag
+    else:
+        raise ValueError(f"Unsupported control type: {cfg.CONTROL.TYPE}")
+
+    return control_map.astype(np.float32)
