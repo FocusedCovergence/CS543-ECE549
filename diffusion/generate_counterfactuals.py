@@ -226,7 +226,9 @@ def generate_all_counterfactuals_for_splits(cfg=None):
 
 
 def main():
-    visualize_validation_index_counterfactuals(1)
+    for i in range(10):
+        visualize_validation_index_counterfactuals(i)
+    # generate_all_counterfactuals_for_splits()
 
 
 if __name__ == "__main__":

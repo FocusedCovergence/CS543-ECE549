@@ -46,7 +46,7 @@ def train_from_scratch(cfg):
 
     trainer = L.Trainer(
         accelerator=accelerator,
-        devices=cfg.TRAIN.N_DEVICES,
+        devices=cfg.TRAIN.DEVICES,
         precision=precision,
         default_root_dir=cfg.PATHS.ROOT,
         callbacks=[checkpoint_callback],
